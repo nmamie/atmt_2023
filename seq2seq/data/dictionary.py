@@ -2,7 +2,6 @@ import collections
 import os
 import torch
 
-
 class Dictionary(object):
     def __init__(self, pad='<pad>', eos='</s>', unk='<unk>'):
         self.pad_word, self.eos_word, self.unk_word = pad, eos, unk
@@ -34,7 +33,8 @@ class Dictionary(object):
             return idx
 
     def binarize(self, string, tokenizer, append_eos=True, add_if_not_exist=False, consumer=None):
-        tokens = tokenizer(string)
+        # tokens = tokenizer(string)
+        tokens = string.split()
         ids = torch.IntTensor(len(tokens) + 1 if append_eos else len(tokens))
         for i, token in enumerate(tokens):
             ids[i] = self.add_word(token) if add_if_not_exist else self.index(token)
@@ -49,7 +49,9 @@ class Dictionary(object):
             return '\n'.join(self.string(t) for t in tensor)
         sentence = ' '.join(self[i] for i in tensor if i != self.eos_idx)
         if bpe_symbol is not None:
+            print(f"Sentence before BPE: {sentence}")
             sentence = (sentence + ' ').replace(bpe_symbol, '').rstrip()
+            print(f"Sentence after BPE: {sentence}")
         return sentence
 
     def finalize(self, threshold=-1, num_words=-1):
