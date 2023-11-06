@@ -1,19 +1,17 @@
+import json
 import os
 import argparse
 import logging
 import collections
 import pickle
 import numpy
-import sentencepiece as spm
 
 from seq2seq import utils
 from seq2seq.data.dictionary import Dictionary
 
-# Initialize SentencePiece processor
-sp_processor = None
-
 from bpe.lean_joint_bpe_and_vocab import *
 from bpe.apply_bpe import *
+from bpe.get_vocab import *
 
 def get_args():
     parser = argparse.ArgumentParser('Data pre-processing)')
@@ -31,7 +29,7 @@ def get_args():
     parser.add_argument('--vocab-src', default=None, type=str, help='path to dictionary')
     parser.add_argument('--vocab-trg', default=None, type=str, help='path to dictionary')
     parser.add_argument('--quiet', action='store_true', help='no logging')
-    parser.add_argument('--bpe-model', default=None, type=str, help='Path to the trained SentencePiece BPE model.')
+    parser.add_argument('--bpe-model', default=None, type=str, help='Path to the trained BPE model.')
     parser.add_argument('--dropout-rate', default=0.1, type=float, help='Dropout rate for BPE dropout.')
     parser.add_argument('--train-bpe', action='store_true', help='Train a new BPE model')
     parser.add_argument('--vocab-size', default=1000 , help='Vocab dataset')
@@ -43,15 +41,23 @@ def get_args():
         metavar='PATH',
         help="Input texts (multiple allowed).")
     parser.add_argument(
-        '--output', '-o', type=argparse.FileType('w'), required=True,
+        '--output', '-o', type=argparse.FileType('w'),
         metavar='PATH',
-        help="Output file for BPE codes.")
+        help="Output files for BPE codes.")
+    parser.add_argument(
+        '--output-bpe', type=argparse.FileType('w'), nargs = '+', default=sys.stdout,
+        metavar='PATH',
+        help="Output files for BPE encodings (multiple allowed).")
     parser.add_argument(
         '--symbols', '-s', type=int, default=10000,
         help="Create this many new symbols (each representing a character n-gram) (default: %(default)s)")
     parser.add_argument(
         '--separator', type=str, default='@@', metavar='STR',
         help="Separator between non-final subword units (default: '%(default)s')")
+    parser.add_argument(
+        '--vocabulary', type=argparse.FileType('r'), nargs = '+' ,default=None,
+        metavar="PATH",
+        help="Vocabulary files (built with get_vocab.py, can be multiple). If provided, this script reverts any merge operations that produce an OOV.")
     parser.add_argument(
         '--write-vocabulary', type=argparse.FileType('w'), required=True, nargs = '+', default=None,
         metavar='PATH', dest='vocab',
@@ -87,27 +93,24 @@ def monolingual_corpus(src_file, tgt_file, output_file):
     out.close()     
 
     
-def bpe_tokenize(line, dropout_rate=0.1, source_lang=True):
-    if source_lang:
-        vocabulary = 'data/en-fr/preprocessed/vocab.fr'
-    else:
-        vocabulary = 'data/en-fr/preprocessed/vocab.en'
-    bpe = BPE(codecs.open('data/en-fr/preprocessed/bpe_codes', encoding='utf-8'), separator='@@', vocab=vocabulary)
-    return bpe.process_line(line, dropout_rate)    
+def bpe_tokenize(line, dropout_rate=0.1, bpe_model=None):
+    proc = bpe_model.process_line(line, dropout_rate) 
+    proc = proc.split()
+    return proc
 
-def build_dictionary(filenames, source_lang=True, tokenize=bpe_tokenize):
+def build_dictionary(filenames, bpe_model=None, tokenize=bpe_tokenize):
     dictionary = Dictionary()
     for filename in filenames:
         with open(filename, 'r') as file:
             for line in file:
-                # for symbol in tokenize(line.strip(), source_lang=source_lang):
-                for symbol in line.strip().split(' '):
+                for symbol in tokenize(line, dropout_rate=args.dropout_rate, bpe_model=bpe_model):
+                # for symbol in line.strip().split(' '):
                     dictionary.add_word(symbol)
                 dictionary.add_word(dictionary.eos_word)
     return dictionary
 
 
-def make_binary_dataset(input_file, output_file, dictionary, tokenize=bpe_tokenize, append_eos=True):
+def make_binary_dataset(input_file, output_file, dictionary, tokenize=bpe_tokenize, bpe_model=None, append_eos=True):
     nsent, ntok = 0, 0
     unk_counter = collections.Counter()
 
@@ -118,7 +121,7 @@ def make_binary_dataset(input_file, output_file, dictionary, tokenize=bpe_tokeni
     tokens_list = []
     with open(input_file, 'r') as inf:
         for line in inf:
-            tokens = dictionary.binarize(line.strip(), tokenize, append_eos, consumer=unk_consumer)
+            tokens = dictionary.binarize(line, tokenize, bpe_model, args.dropout_rate, append_eos, consumer=unk_consumer)
             nsent, ntok = nsent + 1, ntok + len(tokens)
             tokens_list.append(tokens.numpy())
 
@@ -132,9 +135,17 @@ def main(args):
     os.makedirs(args.dest_dir, exist_ok=True)
 
     if args.train_bpe:
-        # train_bpe_model(vocab_size=args.vocab_size)
         learn_joint_bpe_and_vocab(args)
-        args.bpe_model = 'mymodel'
+        # learn_bpe.learn_bpe(args.input[0], args.output[0], args.symbols, args.min_frequency, args.verbose, is_dict=False, total_symbols=args.total_symbols, num_workers=args.num_workers)
+        # learn_bpe.learn_bpe(args.input[1], args.output[1], args.symbols, args.min_frequency, args.verbose, is_dict=False, total_symbols=args.total_symbols, num_workers=args.num_workers)
+        # get_vocab(args.input[0], args.vocab[0])
+        # get_vocab(args.input[1], args.vocab[1])
+        vocabulary_fr = read_vocabulary(args.vocabulary[0], 50)
+        vocabulary_en = read_vocabulary(args.vocabulary[1], 50)
+        bpe_fr = BPE(codecs.open('data/en-fr/preprocessed/bpe_codes', encoding='utf-8'), separator='@@', vocab=vocabulary_fr)
+        bpe_en = BPE(codecs.open('data/en-fr/preprocessed/bpe_codes', encoding='utf-8'), separator='@@', vocab=vocabulary_en)
+        bpe_fr.process_lines('data/en-fr/preprocessed/train.fr', args.output_bpe[0], dropout=args.dropout_rate, num_workers=args.num_workers)
+        bpe_en.process_lines('data/en-fr/preprocessed/train.en', args.output_bpe[1], dropout=args.dropout_rate, num_workers=args.num_workers)
         
     if args.train_autoencoder:
         # train data
@@ -147,7 +158,7 @@ def main(args):
         args.tiny_train_prefix = args.tiny_train_prefix + '.' + 'mono'
 
     if not args.vocab_src:
-        src_dict = build_dictionary([args.train_prefix + '.bpe.' + args.source_lang], source_lang=True)
+        src_dict = build_dictionary([args.train_prefix + '.' + args.source_lang], bpe_model=bpe_fr)
         src_dict.finalize(threshold=args.threshold_src, num_words=args.num_words_src)
         src_dict.save(os.path.join(args.dest_dir, 'dict.' + args.source_lang))
         if not args.quiet:
@@ -158,7 +169,7 @@ def main(args):
             logging.info('Loaded a source dictionary ({}) with {} words'.format(args.source_lang, len(src_dict)))
 
     if not args.vocab_trg:
-        trg_dict = build_dictionary([args.train_prefix + '.bpe.' + args.target_lang], source_lang=False)
+        trg_dict = build_dictionary([args.train_prefix + '.' + args.target_lang], bpe_model=bpe_en)
         trg_dict.finalize(threshold=args.threshold_tgt, num_words=args.num_words_tgt)
         trg_dict.save(os.path.join(args.dest_dir, 'dict.' + args.target_lang))
         if not args.quiet:
@@ -168,12 +179,12 @@ def main(args):
         if not args.quiet:
             logging.info('Loaded a target dictionary ({}) with {} words'.format(args.target_lang, len(trg_dict)))
 
-    make_binary_dataset(args.train_prefix + '.bpe.' + args.source_lang, os.path.join(args.dest_dir, 'train.' + args.source_lang), src_dict)
-    make_binary_dataset(args.train_prefix + '.bpe.' + args.target_lang, os.path.join(args.dest_dir, 'train.' + args.target_lang), trg_dict)
-    make_binary_dataset(args.valid_prefix + '.bpe.' + args.source_lang, os.path.join(args.dest_dir, 'valid.' + args.source_lang), src_dict)
-    make_binary_dataset(args.valid_prefix + '.bpe.' + args.target_lang, os.path.join(args.dest_dir, 'valid.' + args.target_lang), trg_dict)
-    make_binary_dataset(args.test_prefix + '.bpe.' + args.source_lang, os.path.join(args.dest_dir, 'test.' + args.source_lang), src_dict)
-    make_binary_dataset(args.test_prefix + '.bpe.' + args.target_lang, os.path.join(args.dest_dir, 'test.' + args.target_lang), trg_dict)
+    make_binary_dataset(args.train_prefix + '.' + args.source_lang, os.path.join(args.dest_dir, 'train.' + args.source_lang), src_dict, bpe_model=bpe_fr)
+    make_binary_dataset(args.train_prefix + '.' + args.target_lang, os.path.join(args.dest_dir, 'train.' + args.target_lang), trg_dict, bpe_model=bpe_en)
+    make_binary_dataset(args.valid_prefix + '.' + args.source_lang, os.path.join(args.dest_dir, 'valid.' + args.source_lang), src_dict, bpe_model=bpe_fr)
+    make_binary_dataset(args.valid_prefix + '.' + args.target_lang, os.path.join(args.dest_dir, 'valid.' + args.target_lang), trg_dict, bpe_model=bpe_en)
+    make_binary_dataset(args.test_prefix + '.' + args.source_lang, os.path.join(args.dest_dir, 'test.' + args.source_lang), src_dict, bpe_model=bpe_fr)
+    make_binary_dataset(args.test_prefix + '.' + args.target_lang, os.path.join(args.dest_dir, 'test.' + args.target_lang), trg_dict, bpe_model=bpe_en)
 
 if __name__ == '__main__':
     args = get_args()

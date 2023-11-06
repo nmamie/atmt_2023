@@ -179,9 +179,9 @@ def main(args):
             bad_epochs = 0
         else:
             bad_epochs += 1
-        # if bad_epochs >= args.patience:
-        #     logging.info('No validation set improvements observed for {:d} epochs. Early stop!'.format(args.patience))
-        #     break
+        if bad_epochs >= args.patience:
+            logging.info('No validation set improvements observed for {:d} epochs. Early stop!'.format(args.patience))
+            break
 
 
 def validate(args, model, criterion, valid_dataset, epoch):

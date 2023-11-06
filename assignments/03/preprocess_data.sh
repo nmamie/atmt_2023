@@ -39,6 +39,25 @@ rm $data/preprocessed/train.$src.p
 rm $data/preprocessed/train.$tgt.p
 
 # preprocess all files for model training
-python preprocess_bpe_autoencoder.py --target-lang $tgt --source-lang $src --dest-dir $data/prepared/ --train-prefix $data/preprocessed/train --valid-prefix $data/preprocessed/valid --test-prefix $data/preprocessed/test --tiny-train-prefix $data/preprocessed/tiny_train --input $data/raw/train.fr $data/raw/train.en --output $data/preprocessed/bpe_codes --write-vocabulary $data/preprocessed/vocab.fr $data/preprocessed/vocab.en --threshold-src 1 --threshold-tgt 1 --num-words-src 4000 --num-words-tgt 4000 --symbols 4000 --train-bpe --dropout 0.2 --num-workers 16
+# python preprocess_bpe_autoencoder.py --target-lang $tgt --source-lang $src --dest-dir $data/prepared/ --train-prefix $data/preprocessed/train --valid-prefix $data/preprocessed/valid --test-prefix $data/preprocessed/test --tiny-train-prefix $data/preprocessed/tiny_train --input $data/preprocessed/train.fr $data/preprocessed/train.en --output $data/preprocessed/bpe_codes --write-vocabulary $data/preprocessed/vocab.fr $data/preprocessed/vocab.en --threshold-src 1 --threshold-tgt 1 --num-words-src 4000 --num-words-tgt 4000 --symbols 10000 --train-bpe --dropout 0.1 --num-workers 16
+python preprocess_bpe_autoencoder.py --target-lang $tgt --source-lang $src --dest-dir $data/prepared/ --train-prefix $data/preprocessed/train --valid-prefix $data/preprocessed/valid --test-prefix $data/preprocessed/test --tiny-train-prefix $data/preprocessed/tiny_train --input $data/preprocessed/train.fr $data/preprocessed/train.en --output $data/preprocessed/bpe_codes --output-bpe $data/preprocessed/train.bpe.fr $data/preprocessed/train.bpe.en --vocabulary $data/preprocessed/vocab.fr $data/preprocessed/vocab.en --write-vocabulary $data/preprocessed/vocab.fr $data/preprocessed/vocab.en --threshold-src 1 --threshold-tgt 1 --num-words-src 4000 --num-words-tgt 4000 --symbols 10000 --train-bpe --dropout 0.1 --num-workers 16
 
 echo "done!"
+
+
+# python preprocess_bpe_autoencoder.py \
+# --target-lang fr \
+# --source-lang en \
+# --dest-dir data/en-fr/prepared/ \
+# --train-prefix data/en-fr/raw/train \
+# --valid-prefix data/en-fr/raw/valid \
+# --test-prefix data/en-fr/raw/test \
+# --tiny-train-prefix data/en-fr/raw/tiny_train \
+# --input data/en-fr/raw/train.fr data/en-fr/raw/train.en \
+# --output data/en-fr/raw/bpe_codes \
+# --output-bpe data/en-fr/raw/train.bpe.fr data/en-fr/raw/train.bpe.en \
+# --vocabulary data/en-fr/raw/vocab.fr data/en-fr/raw/vocab.en \
+# --write-vocabulary data/en-fr/raw/vocab.fr data/en-fr/raw/vocab.en \
+# --threshold-src 1 --threshold-tgt 1 \
+# --num-words-src 4000 --num-words-tgt 4000 \
+# --symbols 4000 --train-bpe --dropout 0.1 --num-workers 16
