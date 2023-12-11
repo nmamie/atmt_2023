@@ -53,6 +53,29 @@ class BeamSearch(object):
         node = (node[0], node[2])
 
         return node
+    
+    def get_k_best(self):
+        """ 
+        Returns k final nodes with the lowest negative log probability
+        where k is the beam size 
+        """
+        # Merge EOS paths and those that were stopped by
+        # max sequence length (still in nodes)
+        merged = PriorityQueue()
+        for _ in range(self.final.qsize()):
+            node = self.final.get()
+            merged.put(node)
+
+        for _ in range(self.nodes.qsize()):
+            node = self.nodes.get()
+            merged.put(node)
+
+        nodes = []
+        while not merged.empty() and len(nodes) < self.beam_size:
+            node = merged.get()
+            nodes.append((node[0], node[2]))
+
+        return nodes
 
     def prune(self):
         """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
@@ -60,6 +83,14 @@ class BeamSearch(object):
         # Keep track of how many search paths are already finished (EOS)
         finished = self.final.qsize()
         for _ in range(self.beam_size-finished):
+            node = self.nodes.get()
+            nodes.put(node)
+        self.nodes = nodes
+        
+    def diverse_prune(self):
+        """ Removes all nodes but the beam_size best ones (lowest neg log prob) according to diverse beam search """
+        nodes = PriorityQueue()
+        for _ in range(self.beam_size):
             node = self.nodes.get()
             nodes.put(node)
         self.nodes = nodes
@@ -90,8 +121,7 @@ class BeamSearchNode(object):
             :alpha float (default=0.0): hyperparameter for
             length normalization described in in
             https://arxiv.org/pdf/1609.08144.pdf (equation
-            14 as lp), default setting of 0.0 has no effect
-        
+            14 as lp), default setting of 0.0 has no effect        
         """
         normalizer = (5 + self.length)**alpha / (5 + 1)**alpha
         return self.logp / normalizer

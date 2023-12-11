@@ -16,7 +16,7 @@ from seq2seq.beam import BeamSearch, BeamSearchNode
 def get_args():
     """ Defines generation-specific hyper-parameters. """
     parser = argparse.ArgumentParser('Sequence to Sequence Model')
-    parser.add_argument('--cuda', default=False, help='Use a GPU')
+    parser.add_argument('--cuda', default=True, help='Use a GPU')
     parser.add_argument('--seed', default=42, type=int, help='pseudo random number generator seed')
 
     # Add data arguments
@@ -29,9 +29,12 @@ def get_args():
     parser.add_argument('--max-len', default=100, type=int, help='maximum length of generated sequence')
 
     # Add beam search arguments
-    parser.add_argument('--beam-size', default=5, type=int, help='number of hypotheses expanded in beam search')
+    parser.add_argument('--diversity', default=True, type=bool, help='whether to use diverse beam search')
+    parser.add_argument('--beam-size', default=3, type=int, help='number of hypotheses expanded in beam search')
     # alpha hyperparameter for length normalization (described as lp in https://arxiv.org/pdf/1609.08144.pdf equation 14)
-    parser.add_argument('--alpha', default=0.0, type=float, help='alpha for softer length normalization')
+    parser.add_argument('--alpha', default=0.2, type=float, help='alpha for softer length normalization')
+    # beta hyperparameter for diverse beam search (described in https://arxiv.org/pdf/1601.00372.pdf equation 15)
+    parser.add_argument('--lmbda', default=0.5, type=float, help='lambda for diverse beam search')
 
     return parser.parse_args()
 
@@ -120,7 +123,14 @@ def main(args):
                 node = BeamSearchNode(searches[i], emb, lstm_out, final_hidden, final_cell,
                                       mask, torch.cat((go_slice[i], next_word)), log_p, 1)
                 # __QUESTION 3: Why do we add the node with a negative score?
-                searches[i].add(-node.eval(args.alpha), node)
+                # searches[i].add(-node.eval(args.alpha), node)
+                
+                # add diversity penalty
+                if args.diversity:
+                    score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                    searches[i].add(score, node)
+                else:
+                    searches[i].add(-node.eval(args.alpha), node)
 
         #import pdb;pdb.set_trace()
         # Start generating further tokens until max sentence length reached
@@ -177,7 +187,12 @@ def main(args):
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
                             next_word)), node.logp, node.length
                             )
-                        search.add_final(-node.eval(args.alpha), node)
+                        # add diversity penalty
+                        if args.diversity:
+                            score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                            search.add_final(score, node)
+                        else:
+                            search.add_final(-node.eval(args.alpha), node)
 
                     # Add the node to current nodes for next iteration
                     else:
@@ -186,19 +201,34 @@ def main(args):
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
                             next_word)), node.logp + log_p, node.length + 1
                             )
-                        search.add(-node.eval(args.alpha), node)
+                        # add diversity penalty
+                        if args.diversity:
+                            score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                            # import pdb;pdb.set_trace()
+                            search.add(score, node)
+                        else:
+                            search.add(-node.eval(args.alpha), node)
 
             # #import pdb;pdb.set_trace()
             # __QUESTION 5: What happens internally when we prune our beams?
             # How do we know we always maintain the best sequences?
             for search in searches:
-                search.prune()
+                search.diverse_prune() # changed this to keep number of beams constant
 
-        # Segment into sentences
-        best_sents = torch.stack([search.get_best()[1].sequence[1:].cpu() for search in searches])
+        # segment into sentences featuring N-best lists per node
+        best_sents = []
+        for search in searches:
+            for node in search.get_k_best():
+                best_sents.append(node[1].sequence[1:].cpu())
+        # import pdb;pdb.set_trace()
+        best_sents = torch.stack(best_sents)
         decoded_batch = best_sents.numpy()
-        #import pdb;pdb.set_trace()
-
+        # # Segment into sentences
+        # best_sents = torch.stack([search.get_best()[1].sequence[1:].cpu() for search in searches])
+        # decoded_batch = best_sents.numpy()
+        # #import pdb;pdb.set_trace()
+        
+        # instead of a single best sentence, we now have a list of best sentences
         output_sentences = [decoded_batch[row, :] for row in range(decoded_batch.shape[0])]
 
         # __QUESTION 6: What is the purpose of this for loop?
@@ -210,10 +240,21 @@ def main(args):
             else:
                 temp.append(sent)
         output_sentences = temp
+        
+        # for sent in output_sentences:
+        #     first_eos = np.where(sent == tgt_dict.eos_idx)[0]
+        #     if len(first_eos) > 0:
+        #         temp.append(sent[:first_eos[0]])
+        #     else:
+        #         temp.append(sent)
+        # output_sentences = temp
 
         # Convert arrays of indices into strings of words
         # output_sentences = [tgt_dict.string(sent, '▁') for sent in output_sentences]
         output_sentences = [tgt_dict.string(sent, '@@') for sent in output_sentences] # changed this to account for BPE
+        
+        # merge the sentences in the same beam into a single line with each sentence separated by a tab
+        output_sentences = ['\t'.join(output_sentences[i:i+args.beam_size]) for i in range(0, len(output_sentences), args.beam_size)]
 
         for ii, sent in enumerate(output_sentences):
             all_hyps[int(sample['id'].data[ii])] = sent
@@ -224,7 +265,7 @@ def main(args):
         with open(args.output, 'w') as out_file:
             for sent_id in range(len(all_hyps.keys())):
                 out_file.write(all_hyps[sent_id] + '\n')
-
+                
 
 if __name__ == '__main__':
     args = get_args()

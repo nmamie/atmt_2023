@@ -12,6 +12,33 @@ from seq2seq.data.dictionary import Dictionary
 from seq2seq.data.dataset import Seq2SeqDataset, BatchSampler
 from seq2seq.beam import BeamSearch, BeamSearchNode
 
+class BeamSearchNode(object):
+    """ Defines a search node and stores values important for computation of beam search path"""
+    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length, log_probs=[]):
+        # Attributes needed for computation of decoder states
+        self.sequence = sequence
+        self.emb = emb
+        self.lstm_out = lstm_out
+        self.final_hidden = final_hidden
+        self.final_cell = final_cell
+        self.mask = mask
+
+        # Attributes needed for computation of sequence score
+        self.logp = logProb
+        self.length = length
+        self.log_probs = log_probs  # Store log probabilities at each step
+
+        self.search = search
+
+    def eval(self, alpha=0.0, lambda_reg=0.5):
+        """ Returns score of sequence up to this node """
+        normalizer = (5 + self.length)**alpha / (5 + 1)**alpha
+        # Regularizer term
+        lambda_reg=0.03
+        regularizer_term = sum([-log_p ** 2 for log_p in self.log_probs])
+        return self.logp / normalizer - lambda_reg * regularizer_term
+
+
 
 def get_args():
     """ Defines generation-specific hyper-parameters. """
@@ -117,10 +144,16 @@ def main(args):
                 except TypeError:
                     mask = None
 
+                #node = BeamSearchNode(searches[i], emb, lstm_out, final_hidden, final_cell,
+                #                     mask, torch.cat((go_slice[i], next_word)), log_p, 1)
+                
                 node = BeamSearchNode(searches[i], emb, lstm_out, final_hidden, final_cell,
-                                      mask, torch.cat((go_slice[i], next_word)), log_p, 1)
+                      mask, torch.cat((go_slice[i], next_word)), log_p, 1, 
+                      log_probs=[log_p.item()]) 
+                
                 # __QUESTION 3: Why do we add the node with a negative score?
-                searches[i].add(-node.eval(args.alpha), node)
+                #searches[i].add(-node.eval(args.alpha), node)
+                searches[i].add(-node.eval(args.alpha, lambda_reg=0.5), node)
 
         #import pdb;pdb.set_trace()
         # Start generating further tokens until max sentence length reached
@@ -172,21 +205,36 @@ def main(args):
 
                     # Store the node as final if EOS is generated
                     if next_word[-1] == tgt_dict.eos_idx:
+                        # node = BeamSearchNode(
+                        #     search, node.emb, node.lstm_out, node.final_hidden,
+                        #     node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
+                        #     next_word)), node.logp, node.length
+                        #     )
+
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
-                            node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp, node.length
-                            )
-                        search.add_final(-node.eval(args.alpha), node)
+                            node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]), next_word)),
+                            node.logp, node.length, node.log_probs + [log_p.item()]
+                        )
+                        #search.add_final(-node.eval(args.alpha), node)
+                        search.add_final(-node.eval(args.alpha, lambda_reg=0.5), node)
 
                     # Add the node to current nodes for next iteration
                     else:
+                        # node = BeamSearchNode(
+                        #     search, node.emb, node.lstm_out, node.final_hidden,
+                        #     node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
+                        #     next_word)), node.logp + log_p, node.length + 1
+                        #     )
+
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
-                            node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp + log_p, node.length + 1
-                            )
-                        search.add(-node.eval(args.alpha), node)
+                            node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]), next_word)),
+                            node.logp + log_p, node.length + 1, node.log_probs + [log_p.item()]
+                         )
+                                            
+                        #search.add(-node.eval(args.alpha), node)
+                        search.add(-node.eval(args.alpha, lambda_reg=0.5), node)
 
             # #import pdb;pdb.set_trace()
             # __QUESTION 5: What happens internally when we prune our beams?
@@ -213,7 +261,7 @@ def main(args):
 
         # Convert arrays of indices into strings of words
         # output_sentences = [tgt_dict.string(sent, '▁') for sent in output_sentences]
-        output_sentences = [tgt_dict.string(sent, '@@') for sent in output_sentences] # changed this to account for BPE
+        output_sentences = [tgt_dict.string(sent, '@@') for sent in output_sentences]
 
         for ii, sent in enumerate(output_sentences):
             all_hyps[int(sample['id'].data[ii])] = sent
