@@ -33,8 +33,8 @@ def get_args():
     parser.add_argument('--beam-size', default=3, type=int, help='number of hypotheses expanded in beam search')
     # alpha hyperparameter for length normalization (described as lp in https://arxiv.org/pdf/1609.08144.pdf equation 14)
     parser.add_argument('--alpha', default=0.2, type=float, help='alpha for softer length normalization')
-    # beta hyperparameter for diverse beam search (described in https://arxiv.org/pdf/1601.00372.pdf equation 15)
-    parser.add_argument('--lmbda', default=0.5, type=float, help='lambda for diverse beam search')
+    # gamma hyperparameter for diverse beam search (described in https://arxiv.org/pdf/1601.00372.pdf equation 15)
+    parser.add_argument('--gamma', default=0.5, type=float, help='gamma for diverse beam search')
 
     return parser.parse_args()
 
@@ -127,7 +127,7 @@ def main(args):
                 
                 # add diversity penalty
                 if args.diversity:
-                    score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                    score = float(-node.eval(args.alpha) + args.gamma * (j+1))
                     searches[i].add(score, node)
                 else:
                     searches[i].add(-node.eval(args.alpha), node)
@@ -172,7 +172,7 @@ def main(args):
                     log_p = torch.where(best_candidate == tgt_dict.unk_idx, backoff_log_p, best_log_p)
                     log_p = log_p[-1]
                     next_word = torch.cat((prev_words[i][1:], next_word[-1:]))
-
+                    
                     # Get parent node and beam search object for corresponding sentence
                     node = nodes[i]
                     search = node.search
@@ -189,7 +189,7 @@ def main(args):
                             )
                         # add diversity penalty
                         if args.diversity:
-                            score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                            score = float(-node.eval(args.alpha) + args.gamma * (j+1))
                             search.add_final(score, node)
                         else:
                             search.add_final(-node.eval(args.alpha), node)
@@ -203,7 +203,7 @@ def main(args):
                             )
                         # add diversity penalty
                         if args.diversity:
-                            score = float(-node.eval(args.alpha) + args.lmbda * (j+1))
+                            score = float(-node.eval(args.alpha) + args.gamma * (j+1))
                             # import pdb;pdb.set_trace()
                             search.add(score, node)
                         else:
